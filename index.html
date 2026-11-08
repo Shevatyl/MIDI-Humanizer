@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI MIDI Humanizer</title>
+<script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#f1f5f9;--card:#fff;--panel:#f1f5f9;--text:#0f172a;--sub:#64748b;--acc:#0284c7;--accT:#fff;--btn:#e2e8f0;--ok:#047857;--line:#cbd5e1;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1e1e24;--card:#2a2a35;--panel:#22222e;--text:#f5f5f5;--sub:#94a3b8;--acc:#38bdf8;--accT:#0f172a;--btn:#475569;--ok:#34d399;--line:#475569}}
+:root[data-theme="dark"]{--bg:#1e1e24;--card:#2a2a35;--panel:#22222e;--text:#f5f5f5;--sub:#94a3b8;--acc:#38bdf8;--accT:#0f172a;--btn:#475569;--ok:#34d399;--line:#475569}
+*{box-sizing:border-box}
+body{margin:0;padding:20px;background:var(--bg);color:var(--text);font-family:'Helvetica Neue',Arial,sans-serif;display:flex;justify-content:center}
+.c{width:100%;max-width:680px;background:var(--card);padding:26px;border-radius:12px}
+h1{text-align:center;color:var(--acc);margin:0 0 18px}
+h2{font-size:14px;color:var(--sub);margin:20px 0 8px}
+#drop{border:2px dashed var(--acc);border-radius:8px;padding:30px 16px;text-align:center;background:var(--panel);cursor:pointer}
+#drop.hover{opacity:.8}
+#info{margin-top:8px;color:var(--ok);font-weight:bold;font-size:14px}
+.presets{display:flex;flex-wrap:wrap;gap:8px}
+.pb{background:var(--btn);color:var(--text);border:0;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:13px}
+.pb.active{background:var(--acc);color:var(--accT)}
+.pb .x{margin-left:6px;opacity:.6}
+.grp{background:var(--panel);padding:12px 14px;border-radius:8px;margin-bottom:10px}
+.grp h3{margin:0 0 8px;font-size:13px;color:var(--acc)}
+.row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}
+.row label{width:42%}
+.row input[type=range]{flex:1;accent-color:var(--acc);min-width:0}
+.row .v{width:52px;text-align:right;font-family:monospace;color:var(--acc)}
+.save{display:flex;gap:8px;margin-top:8px}
+.save input,.seed input{flex:1;padding:8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);min-width:0}
+.seed{display:flex;gap:8px;align-items:center;font-size:13px}
+textarea{width:100%;height:70px;margin-top:8px;background:var(--panel);color:var(--sub);border:1px solid var(--line);border-radius:6px;font-family:monospace;font-size:11px;padding:6px}
+#go{display:block;width:100%;background:#059669;color:#fff;border:0;padding:14px;font-size:16px;font-weight:bold;border-radius:8px;cursor:pointer;margin-top:20px}
+#go:disabled{background:#6b7280;cursor:not-allowed}
+#msg{margin-top:10px;font-size:13px;color:var(--sub);min-height:1.2em}
+</style>
+</head>
+<body>
+<div class="c">
+<h1>AI MIDI Humanizer</h1>
+<div id="drop"><p>ここにMIDIファイルをドラッグ＆ドロップ</p><span style="font-size:12px;color:var(--sub)">またはクリックして選択</span>
+<input type="file" id="file" accept=".mid,.midi" style="display:none"><div id="info"></div></div>
+
+<h2>プリセット（自動パターン）</h2>
+<div class="presets" id="presets"></div>
+<div class="save"><input id="pname" placeholder="現在の設定に名前を付けて保存"><button class="pb" id="psave">保存</button></div>
+
+<h2>パラメータ</h2>
+<div class="save" style="margin-bottom:10px"><button class="pb" id="rst0">原曲に戻す（補正すべて0）</button><button class="pb" id="rstd">初期値に戻す</button></div>
+<div id="params"></div>
+<div class="grp"><div class="row"><label>クォンタイズ基準</label><select id="grid" style="padding:6px;border-radius:6px;background:var(--panel);color:var(--text);border:1px solid var(--line)"><option value="4">1/4</option><option value="8">1/8</option><option value="16" selected>1/16</option><option value="32">1/32</option></select></div></div>
+<div class="seed"><label>乱数シード</label><input type="number" id="seed" value="1"><button class="pb" id="dice">🎲</button></div>
+<textarea id="json" readonly></textarea>
+
+<button id="go" disabled>ヒューマナイズしてMIDIを出力</button>
+<div id="msg"></div>
+</div>
+
+<script>
+const MidiCls = (typeof Midi === 'function') ? Midi : (Midi && Midi.Midi);
+const PARAMS = [
+ {g:'タイミング',k:'timeJitter',l:'揺らぎ(秒)',min:0,max:0.05,step:0.001,def:0.01},
+ {g:'タイミング',k:'shift',l:'全体ズレ(−前ノリ/＋後ノリ)',min:-0.04,max:0.04,step:0.001,def:0},
+ {g:'タイミング',k:'swing',l:'スイング(裏拍を遅らせる)',min:0,max:1,step:0.05,def:0},
+ {g:'タイミング',k:'chordSpread',l:'和音ばらし(低→高,秒)',min:0,max:0.06,step:0.002,def:0},
+ {g:'タイミング',k:'drumShift',l:'ドラムだけのズレ(秒)',min:-0.03,max:0.03,step:0.001,def:0},
+ {g:'タイミング',k:'bassShift',l:'低音域(C3未満)のズレ(秒)',min:-0.03,max:0.03,step:0.001,def:0},
+ {g:'強さ',k:'velJitter',l:'ベロシティ揺らぎ',min:0,max:0.3,step:0.01,def:0.08},
+ {g:'強さ',k:'accent',l:'拍アクセント(強拍↑弱拍↓)',min:0,max:0.3,step:0.01,def:0},
+ {g:'強さ',k:'rangeVel',l:'音域連動(高音を弱く)',min:0,max:0.3,step:0.01,def:0},
+ {g:'強さ',k:'melody',l:'和音の最高音を強調',min:0,max:0.3,step:0.01,def:0},
+ {g:'強さ',k:'ghost',l:'ゴースト化の確率',min:0,max:0.5,step:0.01,def:0},
+ {g:'音の長さ',k:'gate',l:'ゲート倍率',min:0.5,max:1.5,step:0.02,def:1},
+ {g:'音の長さ',k:'durJitter',l:'音長の揺らぎ',min:0,max:0.3,step:0.01,def:0},
+ {g:'ミス',k:'dropout',l:'音抜け確率',min:0,max:0.05,step:0.002,def:0},
+ {g:'ならす（平均化）',k:'quantize',l:'クォンタイズ強度(グリッドへ寄せる)',min:0,max:1,step:0.05,def:0},
+ {g:'ならす（平均化）',k:'velFlatten',l:'ベロシティ平均化(トラック平均へ)',min:0,max:1,step:0.05,def:0}
+];
+// プリセットはここに1行足すだけで増える（未指定の項目は初期値に戻る）
+const PRESETS = {
+ '繊細なピアノ':{timeJitter:0.018,shift:0.005,velJitter:0.15,chordSpread:0.014,melody:0.08,rangeVel:0.08,durJitter:0.06},
+ '激しいロック':{timeJitter:0.004,shift:-0.005,velJitter:0.05,accent:0.12,drumShift:-0.004,gate:0.95},
+ '前ノリ(ファンク)':{timeJitter:0.012,shift:-0.012,velJitter:0.10,accent:0.08,ghost:0.15,bassShift:0.006},
+ 'ジャズ・スイング':{timeJitter:0.014,shift:0.004,swing:0.7,velJitter:0.12,accent:0.1,ghost:0.1,gate:0.92},
+ 'バラード':{timeJitter:0.016,shift:0.008,velJitter:0.12,chordSpread:0.02,melody:0.1,gate:1.05,durJitter:0.05},
+ 'ローファイ':{timeJitter:0.025,shift:0.012,velJitter:0.18,swing:0.3,dropout:0.004,durJitter:0.1},
+ 'アコギ・ストラム':{timeJitter:0.008,velJitter:0.1,chordSpread:0.03,accent:0.12,gate:1.1},
+ 'ボカロ(控えめ)':{timeJitter:0.006,shift:0.002,velJitter:0.05,accent:0.05,durJitter:0.03}
+};
+const $ = id => document.getElementById(id);
+let midi = null, baseName = 'humanized', custom = {}, activeName = null;
+const CK = 'mh_custom_presets';
+try { custom = JSON.parse(localStorage.getItem(CK) || '{}') || {}; } catch (e) { custom = {}; }
+
+// スライダー自動生成
+const groups = {};
+PARAMS.forEach(p => {
+  if (!groups[p.g]) { const d = document.createElement('div'); d.className = 'grp'; d.innerHTML = '<h3>' + p.g + '</h3>'; $('params').appendChild(d); groups[p.g] = d; }
+  const r = document.createElement('div'); r.className = 'row';
+  r.innerHTML = '<label>' + p.l + '</label><input type="range" id="p_' + p.k + '" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '" value="' + p.def + '"><span class="v" id="v_' + p.k + '"></span>';
+  groups[p.g].appendChild(r);
+  const el = r.querySelector('input');
+  el.addEventListener('input', () => { show(p); activeName = null; markActive(); updJson(); });
+  show(p);
+});
+function dec(p) { return (String(p.step).split('.')[1] || '').length; }
+function show(p) { $('v_' + p.k).textContent = (+$('p_' + p.k).value).toFixed(dec(p)); }
+function vals() { const o = {}; PARAMS.forEach(p => o[p.k] = +$('p_' + p.k).value); o.grid = +$('grid').value; return o; }
+function updJson() { $('json').value = JSON.stringify(vals()); }
+function setVals(o) { PARAMS.forEach(p => { $('p_' + p.k).value = (p.k in o) ? o[p.k] : p.def; show(p); }); $('grid').value = o.grid || 16; updJson(); }
+
+function renderPresets() {
+  const box = $('presets'); box.innerHTML = '';
+  const add = (name, o, isCustom) => {
+    const b = document.createElement('button'); b.className = 'pb'; b.textContent = name; b.dataset.name = name;
+    b.onclick = () => { setVals(o); activeName = name; markActive(); };
+    if (isCustom) {
+      const x = document.createElement('span'); x.className = 'x'; x.textContent = '×';
+      x.onclick = e => { e.stopPropagation(); delete custom[name]; persist(); renderPresets(); };
+      b.appendChild(x);
+    }
+    box.appendChild(b);
+  };
+  Object.keys(PRESETS).forEach(n => add(n, PRESETS[n], false));
+  Object.keys(custom).forEach(n => add(n, custom[n], true));
+  markActive();
+}
+function markActive() { document.querySelectorAll('.pb[data-name]').forEach(b => b.classList.toggle('active', b.dataset.name === activeName)); }
+function persist() { try { localStorage.setItem(CK, JSON.stringify(custom)); } catch (e) {} }
+$('psave').onclick = () => {
+  const n = $('pname').value.trim(); if (!n) return;
+  custom[n] = vals(); persist(); activeName = n; $('pname').value = ''; renderPresets();
+};
+$('dice').onclick = () => { $('seed').value = Math.floor(Math.random() * 99999); };
+
+// ファイル読み込み
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('hover'); };
+drop.ondragleave = () => drop.classList.remove('hover');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('hover'); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); };
+$('file').onchange = e => { if (e.target.files[0]) load(e.target.files[0]); };
+function load(f) {
+  if (!/\.midi?$/i.test(f.name)) { $('msg').textContent = 'MIDIファイル(.mid)を選択してください。'; return; }
+  baseName = f.name.replace(/\.midi?$/i, '') + '_humanized';
+  const rd = new FileReader();
+  rd.onload = e => {
+    try {
+      midi = new MidiCls(e.target.result);
+      const n = midi.tracks.reduce((a, t) => a + t.notes.length, 0);
+      $('info').textContent = '読み込み完了: ' + f.name + '（' + midi.tracks.length + ' トラック / ' + n + ' ノート）';
+      $('go').disabled = false; $('msg').textContent = '';
+    } catch (err) { $('msg').textContent = 'MIDIファイルの解析に失敗しました。'; }
+  };
+  rd.readAsArrayBuffer(f);
+}
+
+// 乱数（シード固定）
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function humanize() {
+  const P = vals(), rnd = mulberry32(parseInt($('seed').value) || 1);
+  const gauss = () => { let u = 0; while (!u) u = rnd(); const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd()); return Math.max(-1, Math.min(1, z / 2.5)); };
+  const M = new MidiCls(midi.toArray());           // クローン（CCやテンポ情報も保持）
+  const ppq = M.header.ppq;
+  const ts = (M.header.timeSignatures[0] && M.header.timeSignatures[0].timeSignature) || [4, 4];
+  const barBeats = ts[0] * 4 / ts[1];
+  const beatSec = 60 / ((M.header.tempos[0] && M.header.tempos[0].bpm) || 120);
+  let total = 0, dropped = 0;
+  M.tracks.forEach(tr => {
+    const drum = tr.channel === 9 || (tr.instrument && tr.instrument.percussion);
+    const sorted = [...tr.notes].sort((a, b) => a.ticks - b.ticks || a.midi - b.midi);
+    const info = new Map();
+    for (let i = 0; i < sorted.length;) {
+      let j = i; while (j + 1 < sorted.length && sorted[j + 1].ticks - sorted[i].ticks <= ppq / 32) j++;
+      for (let k = i; k <= j; k++) info.set(sorted[k], { idx: k - i, top: j > i && k === j });
+      i = j + 1;
+    }
+    const keep = []; const vmean = sorted.length ? sorted.reduce((a, n) => a + n.velocity, 0) / sorted.length : 0; const gt = ppq * 4 / P.grid;
+    sorted.forEach(n => {
+      total++;
+      if (P.dropout && rnd() < P.dropout) { dropped++; return; }
+      const beat = n.ticks / ppq, inBar = beat % barBeats, frac = beat % 1, ci = info.get(n);
+      const down = inBar < 0.02 || barBeats - inBar < 0.02, onBeat = frac < 0.02 || frac > 0.98;
+      const qt = Math.round(n.ticks / gt) * gt; let t = M.header.ticksToSeconds(n.ticks + (qt - n.ticks) * P.quantize) + P.shift + gauss() * P.timeJitter;
+      if (Math.abs(frac - 0.5) < 0.05) t += P.swing * beatSec / 6;
+      if (!drum) t += ci.idx * P.chordSpread;
+      if (drum) t += P.drumShift; else if (n.midi < 48) t += P.bassShift;
+      let v = (n.velocity + (vmean - n.velocity) * P.velFlatten) * (1 + gauss() * P.velJitter * 2);
+      v *= 1 + P.accent * (down ? 1 : onBeat ? 0.3 : -0.6);
+      if (!drum) v *= 1 - P.rangeVel * (n.midi - 60) / 40;
+      if (ci.top && !drum) v *= 1 + P.melody;
+      if (P.ghost && rnd() < P.ghost) v *= 0.5;
+      let d = n.duration * P.gate * (1 + gauss() * P.durJitter * 2);
+      n.time = Math.max(0, t);                      // 先に時間→次に長さ
+      n.duration = Math.max(0.02, d);
+      n.velocity = Math.max(0.05, Math.min(1, v));
+      keep.push(n);
+    });
+    tr.notes.splice(0, tr.notes.length, ...keep);
+  });
+  return { arr: M.toArray(), total, dropped };
+}
+
+$('go').onclick = async () => {
+  if (!midi) return;
+  let res;
+  try { res = humanize(); } catch (e) { $('msg').textContent = '処理に失敗しました: ' + e.message; return; }
+  const name = baseName + '.mid';
+  let dl = null;
+  try { dl = window.claude ? await window.claude.use('downloads') : null; } catch (e) {}
+  try {
+    if (dl) {
+      // 公開ページでは .mid が保存対象外のため zip に入れて渡す
+      const z = new JSZip(); z.file(name, res.arr);
+      const data = await z.generateAsync({ type: 'uint8array' });
+      await dl.save({ filename: baseName + '.zip', data });
+      $('msg').textContent = res.total + ' ノート処理（音抜け ' + res.dropped + '）。zip内に ' + name + ' が入っています。';
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([res.arr], { type: 'audio/midi' })); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      $('msg').textContent = res.total + ' ノート処理（音抜け ' + res.dropped + '）。' + name + ' を出力しました。';
+    }
+  } catch (e) {
+    $('msg').textContent = (e && e.code === 'declined') ? '保存をキャンセルしました。' : '保存に失敗しました。';
+  }
+};
+
+$('grid').onchange = () => { activeName = null; markActive(); updJson(); };
+$('rst0').onclick = () => { const z = {}; PARAMS.forEach(p => z[p.k] = (p.k === 'gate') ? 1 : 0); setVals(z); activeName = null; markActive(); };
+$('rstd').onclick = () => { setVals({}); activeName = null; markActive(); };
+setVals({}); renderPresets();
+</script>
+</body>
+</html>
