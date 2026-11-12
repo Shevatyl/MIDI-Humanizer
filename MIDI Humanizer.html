@@ -18,6 +18,7 @@ h1{text-align:center;color:var(--acc);margin:0 0 18px}
 h2{font-size:14px;color:var(--sub);margin:20px 0 8px}
 #drop{border:2px dashed var(--acc);border-radius:8px;padding:30px 16px;text-align:center;background:var(--panel);cursor:pointer}
 #drop.hover{opacity:.8}
+#presets{display:block}.ct{font-size:12px;color:var(--sub);margin:10px 0 4px}
 #info{margin-top:8px;color:var(--ok);font-weight:bold;font-size:14px}
 .presets{display:flex;flex-wrap:wrap;gap:8px}
 .pb{background:var(--btn);color:var(--text);border:0;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:13px}
@@ -66,6 +67,7 @@ const PARAMS = [
  {g:'タイミング',k:'shift',l:'全体ズレ(−前ノリ/＋後ノリ)',min:-0.04,max:0.04,step:0.001,def:0},
  {g:'タイミング',k:'swing',l:'スイング(裏拍を遅らせる)',min:0,max:1,step:0.05,def:0},
  {g:'タイミング',k:'chordSpread',l:'和音ばらし(低→高,秒)',min:0,max:0.06,step:0.002,def:0},
+ {g:'タイミング',k:'stroke',l:'ストローク感(裏拍=アップ化)',min:0,max:1,step:0.05,def:0},
  {g:'タイミング',k:'drumShift',l:'ドラムだけのズレ(秒)',min:-0.03,max:0.03,step:0.001,def:0},
  {g:'タイミング',k:'bassShift',l:'低音域(C3未満)のズレ(秒)',min:-0.03,max:0.03,step:0.001,def:0},
  {g:'強さ',k:'velJitter',l:'ベロシティ揺らぎ',min:0,max:0.3,step:0.01,def:0.08},
@@ -81,25 +83,36 @@ const PARAMS = [
 ];
 // プリセットはここに1行足すだけで増える（未指定の項目は初期値に戻る）
 const PRESETS = {
- '繊細なピアノ':{timeJitter:0.018,shift:0.005,velJitter:0.15,chordSpread:0.014,melody:0.08,rangeVel:0.08,durJitter:0.06},
- '激しいロック':{timeJitter:0.004,shift:-0.005,velJitter:0.05,accent:0.12,drumShift:-0.004,gate:0.95},
- '前ノリ(ファンク)':{timeJitter:0.012,shift:-0.012,velJitter:0.10,accent:0.08,ghost:0.15,bassShift:0.006},
- 'ジャズ・スイング':{timeJitter:0.014,shift:0.004,swing:0.7,velJitter:0.12,accent:0.1,ghost:0.1,gate:0.92},
- 'バラード':{timeJitter:0.016,shift:0.008,velJitter:0.12,chordSpread:0.02,melody:0.1,gate:1.05,durJitter:0.05},
- 'ローファイ':{timeJitter:0.025,shift:0.012,velJitter:0.18,swing:0.3,dropout:0.004,durJitter:0.1},
- 'アコギ・ストラム':{timeJitter:0.008,velJitter:0.1,chordSpread:0.03,accent:0.12,gate:1.1},
- 'ボカロ(控えめ)':{timeJitter:0.006,shift:0.002,velJitter:0.05,accent:0.05,durJitter:0.03},
- 'ほんのり人間味':{timeJitter:0.004,velJitter:0.04,durJitter:0.02},
- 'ポップス(自然)':{timeJitter:0.008,shift:0.002,velJitter:0.07,accent:0.06,melody:0.05,durJitter:0.03},
- 'EDM/ダンス(タイト)':{timeJitter:0.002,velJitter:0.03,accent:0.1,gate:0.9,quantize:0.5},
- 'ヒップホップ(ヨレ)':{timeJitter:0.012,shift:0.01,swing:0.45,velJitter:0.12,accent:0.1,ghost:0.2,drumShift:0.008,bassShift:0.01,gate:0.9},
- 'R&B/ゴスペル(レイドバック)':{timeJitter:0.014,shift:0.015,velJitter:0.12,chordSpread:0.022,melody:0.1,rangeVel:0.05,durJitter:0.06,gate:1.05},
- 'ボサノバ':{timeJitter:0.01,shift:0.004,swing:0.2,velJitter:0.1,chordSpread:0.012,accent:0.06,ghost:0.08,gate:0.9},
- 'ブルース・シャッフル':{timeJitter:0.012,swing:0.9,velJitter:0.12,accent:0.1,ghost:0.1,gate:0.95,durJitter:0.05},
- 'ストリングス/オケ':{timeJitter:0.014,shift:0.006,velJitter:0.08,chordSpread:0.01,rangeVel:0.06,durJitter:0.08,gate:1.08},
- 'ギター・アルペジオ':{timeJitter:0.01,velJitter:0.1,chordSpread:0.016,melody:0.12,gate:1.15,durJitter:0.06},
- 'ライブ演奏(荒め)':{timeJitter:0.03,velJitter:0.2,durJitter:0.12,dropout:0.003,swing:0.1,accent:0.1},
- '整え＋人間味(打ち込み補正)':{quantize:0.8,timeJitter:0.006,velJitter:0.05,velFlatten:0.4}
+ '繊細なピアノ':{cat:'鍵盤',timeJitter:0.018,shift:0.005,velJitter:0.15,chordSpread:0.014,melody:0.08,rangeVel:0.08,durJitter:0.06},
+ 'クラシック・ピアノ':{cat:'鍵盤',timeJitter:0.012,velJitter:0.12,chordSpread:0.01,melody:0.15,rangeVel:0.08,durJitter:0.1,gate:1.05},
+ 'ジャズ・ピアノ(コンピング)':{cat:'鍵盤',timeJitter:0.014,shift:0.004,swing:0.7,velJitter:0.12,chordSpread:0.012,accent:0.08,ghost:0.15,gate:0.85},
+ 'バラード':{cat:'鍵盤',timeJitter:0.016,shift:0.008,velJitter:0.12,chordSpread:0.02,melody:0.1,gate:1.05,durJitter:0.05},
+ 'R&B/ゴスペル(レイドバック)':{cat:'鍵盤',timeJitter:0.014,shift:0.015,velJitter:0.12,chordSpread:0.022,melody:0.1,rangeVel:0.05,durJitter:0.06,gate:1.05},
+ 'ジャズ・スイング':{cat:'鍵盤',timeJitter:0.014,shift:0.004,swing:0.7,velJitter:0.12,accent:0.1,ghost:0.1,gate:0.92},
+ 'アコギ・ストラム':{cat:'ギター',timeJitter:0.008,velJitter:0.1,chordSpread:0.03,accent:0.12,gate:1.1,stroke:0.6},
+ 'ポップロック・ストローク':{cat:'ギター',timeJitter:0.006,velJitter:0.08,chordSpread:0.018,accent:0.15,gate:1,stroke:0.5},
+ 'カントリー・ストラム':{cat:'ギター',timeJitter:0.01,swing:0.25,velJitter:0.1,chordSpread:0.026,accent:0.1,gate:1.1,stroke:0.7,bassShift:-0.004},
+ 'ファンク・カッティング':{cat:'ギター',timeJitter:0.006,shift:-0.008,velJitter:0.1,chordSpread:0.01,accent:0.1,ghost:0.3,gate:0.78,stroke:0.8},
+ 'ギター・アルペジオ':{cat:'ギター',timeJitter:0.01,velJitter:0.1,chordSpread:0.016,melody:0.12,gate:1.15,durJitter:0.06},
+ 'フィンガーピッキング':{cat:'ギター',timeJitter:0.012,velJitter:0.1,chordSpread:0.008,melody:0.2,durJitter:0.1,gate:1.1},
+ 'ボサノバ':{cat:'ギター',timeJitter:0.01,shift:0.004,swing:0.2,velJitter:0.1,chordSpread:0.012,accent:0.06,ghost:0.08,gate:0.9,stroke:0.4},
+ 'ブルース・シャッフル':{cat:'ギター',timeJitter:0.012,swing:0.9,velJitter:0.12,accent:0.1,ghost:0.1,gate:0.95,durJitter:0.05},
+ 'ベース(指弾き)':{cat:'ベース',timeJitter:0.01,shift:0.004,velJitter:0.1,durJitter:0.08,gate:1.05,bassShift:0.006},
+ 'ベース(ピック)':{cat:'ベース',timeJitter:0.005,velJitter:0.06,accent:0.12,gate:0.9},
+ '激しいロック':{cat:'ドラム/バンド',timeJitter:0.004,shift:-0.005,velJitter:0.05,accent:0.12,drumShift:-0.004,gate:0.95},
+ '前ノリ(ファンク)':{cat:'ドラム/バンド',timeJitter:0.012,shift:-0.012,velJitter:0.10,accent:0.08,ghost:0.15,bassShift:0.006},
+ 'ライブ演奏(荒め)':{cat:'ドラム/バンド',timeJitter:0.03,velJitter:0.2,durJitter:0.12,dropout:0.003,swing:0.1,accent:0.1},
+ 'ドラム・タイト':{cat:'ドラム/バンド',timeJitter:0.003,velJitter:0.05,accent:0.1,drumShift:-0.003,ghost:0.05,gate:0.9},
+ 'ドラム・ルーズ':{cat:'ドラム/バンド',timeJitter:0.016,velJitter:0.14,accent:0.08,drumShift:0.006,ghost:0.2,durJitter:0.05},
+ 'EDM/ダンス(タイト)':{cat:'打ち込み',timeJitter:0.002,velJitter:0.03,accent:0.1,gate:0.9,quantize:0.5},
+ 'ヒップホップ(ヨレ)':{cat:'打ち込み',timeJitter:0.012,shift:0.01,swing:0.45,velJitter:0.12,accent:0.1,ghost:0.2,drumShift:0.008,bassShift:0.01,gate:0.9},
+ 'ローファイ':{cat:'打ち込み',timeJitter:0.025,shift:0.012,velJitter:0.18,swing:0.3,dropout:0.004,durJitter:0.1},
+ '整え＋人間味(打ち込み補正)':{cat:'打ち込み',quantize:0.8,timeJitter:0.006,velJitter:0.05,velFlatten:0.4},
+ 'ボカロ(控えめ)':{cat:'ボーカル/弦',timeJitter:0.006,shift:0.002,velJitter:0.05,accent:0.05,durJitter:0.03},
+ 'ストリングス/オケ':{cat:'ボーカル/弦',timeJitter:0.014,shift:0.006,velJitter:0.08,chordSpread:0.01,rangeVel:0.06,durJitter:0.08,gate:1.08},
+ 'ほんのり人間味':{cat:'汎用',timeJitter:0.004,velJitter:0.04,durJitter:0.02},
+ 'ポップス(自然)':{cat:'汎用',timeJitter:0.008,shift:0.002,velJitter:0.07,accent:0.06,melody:0.05,durJitter:0.03},
+ 'シティポップ':{cat:'汎用',timeJitter:0.008,shift:-0.004,swing:0.15,velJitter:0.08,accent:0.08,ghost:0.08,melody:0.06,gate:0.95}
 };
 const $ = id => document.getElementById(id);
 let midi = null, baseName = 'humanized', custom = {}, activeName = null;
@@ -126,7 +139,7 @@ function setVals(o) { PARAMS.forEach(p => { $('p_' + p.k).value = (p.k in o) ? o
 function tip(o) { return Object.keys(o).map(k => { const p = PARAMS.find(q => q.k === k); return p ? p.l.replace(/[（(].*$/, '') + ' ' + o[k] : ''; }).filter(Boolean).join(' / '); }
 function renderPresets() {
   const box = $('presets'); box.innerHTML = '';
-  const add = (name, o, isCustom) => {
+  const add = (parent, name, o, isCustom) => {
     const b = document.createElement('button'); b.className = 'pb'; b.textContent = name; b.dataset.name = name; b.title = tip(o);
     b.onclick = () => { setVals(o); activeName = name; markActive(); };
     if (isCustom) {
@@ -134,10 +147,16 @@ function renderPresets() {
       x.onclick = e => { e.stopPropagation(); delete custom[name]; persist(); renderPresets(); };
       b.appendChild(x);
     }
-    box.appendChild(b);
+    parent.appendChild(b);
   };
-  Object.keys(PRESETS).forEach(n => add(n, PRESETS[n], false));
-  Object.keys(custom).forEach(n => add(n, custom[n], true));
+  const cats = {};
+  Object.keys(PRESETS).forEach(n => { const c = PRESETS[n].cat || '汎用'; (cats[c] = cats[c] || []).push(n); });
+  const section = (title, names, src, isCustom) => {
+    const s = document.createElement('div'); s.innerHTML = '<div class="ct">' + title + '</div><div class="presets"></div>';
+    names.forEach(n => add(s.lastChild, n, src[n], isCustom)); box.appendChild(s);
+  };
+  Object.keys(cats).forEach(c => section(c, cats[c], PRESETS, false));
+  if (Object.keys(custom).length) section('マイプリセット', Object.keys(custom), custom, true);
   markActive();
 }
 function markActive() { document.querySelectorAll('.pb[data-name]').forEach(b => b.classList.toggle('active', b.dataset.name === activeName)); }
@@ -188,7 +207,7 @@ function humanize() {
     const info = new Map();
     for (let i = 0; i < sorted.length;) {
       let j = i; while (j + 1 < sorted.length && sorted[j + 1].ticks - sorted[i].ticks <= ppq / 32) j++;
-      for (let k = i; k <= j; k++) info.set(sorted[k], { idx: k - i, top: j > i && k === j });
+      for (let k = i; k <= j; k++) info.set(sorted[k], { idx: k - i, size: j - i + 1, top: j > i && k === j });
       i = j + 1;
     }
     const keep = []; const vmean = sorted.length ? sorted.reduce((a, n) => a + n.velocity, 0) / sorted.length : 0; const gt = ppq * 4 / P.grid;
@@ -199,11 +218,13 @@ function humanize() {
       const down = inBar < 0.02 || barBeats - inBar < 0.02, onBeat = frac < 0.02 || frac > 0.98;
       const qt = Math.round(n.ticks / gt) * gt; let t = M.header.ticksToSeconds(n.ticks + (qt - n.ticks) * P.quantize) + P.shift + gauss() * P.timeJitter;
       if (Math.abs(frac - 0.5) < 0.05) t += P.swing * beatSec / 6;
-      if (!drum) t += ci.idx * P.chordSpread;
+      const up = !drum && ci.size > 1 && P.stroke > 0 && Math.abs(frac - 0.5) < 0.05, s = up ? P.stroke : 0;
+      if (!drum) t += (ci.idx + (ci.size - 1 - 2 * ci.idx) * s) * P.chordSpread * (1 - 0.3 * s);
       if (drum) t += P.drumShift; else if (n.midi < 48) t += P.bassShift;
       let v = (n.velocity + (vmean - n.velocity) * P.velFlatten) * (1 + gauss() * P.velJitter * 2);
       v *= 1 + P.accent * (down ? 1 : onBeat ? 0.3 : -0.6);
       if (!drum) v *= 1 - P.rangeVel * (n.midi - 60) / 40;
+      if (!drum && ci.size > 1 && P.stroke > 0) v *= up ? 1 - P.stroke * (0.2 + 0.3 * (1 - ci.idx / (ci.size - 1))) : 1 + 0.08 * P.stroke;
       if (ci.top && !drum) v *= 1 + P.melody;
       if (P.ghost && rnd() < P.ghost) v *= 0.5;
       let d = n.duration * P.gate * (1 + gauss() * P.durJitter * 2);
